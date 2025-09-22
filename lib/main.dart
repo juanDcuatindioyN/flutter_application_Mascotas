@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'pantallas/login.dart';
+import 'Pantallas/login.dart';
+import 'Pantallas/register.dart';
+import 'Pantallas/pagina_inicio.dart';
 
 void main() {
   runApp(const MyApp());
@@ -11,12 +13,34 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'AdoptaMascota',
+      title: 'AdoptaAmigo',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF00BFA6),
+          brightness: Brightness.light,
+        ),
+        inputDecorationTheme: const InputDecorationTheme(
+          filled: true,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        cardTheme: const CardThemeData(
+          elevation: 8,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(24)),
+          ),
+        ),
       ),
-      home: const LoginScreen(),
+      initialRoute: '/login',
+      routes: {
+        '/login': (_) => const LoginScreen(),
+        '/register': (_) => const RegisterScreen(),
+        '/home': (_) => const PaginaInicio(),
+      },
     );
   }
 }

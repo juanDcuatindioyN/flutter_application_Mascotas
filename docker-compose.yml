@@ -1,0 +1,41 @@
+version: "3.9"
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: api_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: mascotas_db
+      MYSQL_USER: mascotas_user
+      MYSQL_PASSWORD: mascotas_pass
+    ports:
+      - "3307:3306"        # MySQL accesible en localhost:3307
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  php:
+    image: php:8.2-apache
+    container_name: api_php
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./api:/var/www/html        # monta tu carpeta api/ como docroot
+    ports:
+      - "8080:80"                  # API en http://localhost:8080
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: mascotas_db
+      DB_USER: mascotas_user
+      DB_PASS: mascotas_pass
+    # habilita extensiones necesarias
+    command: bash -lc "docker-php-ext-install mysqli && apache2-foreground"
+
+volumes:
+  db_data:
