@@ -1,63 +1,35 @@
 <?php
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
-header("Content-Type: application/json; charset=UTF-8");
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
-
 require 'db_connection.php';
+header("Content-Type: application/json; charset=UTF-8");
 
-$raw = file_get_contents("php://input");
-$data = json_decode($raw);
+$in = json_decode(file_get_contents('php://input'), true);
+if (!$in) { http_response_code(400); echo json_encode(["success"=>false,"msg"=>"JSON inválido"]); exit; }
 
-$nombre     = $data->nombre     ?? '';
-$correo     = $data->correo     ?? '';
-$contrasena = $data->contrasena ?? '';
-$telefono   = $data->telefono   ?? '';
+$nombre    = trim($in['nombre'] ?? '');
+$correo    = trim($in['correo'] ?? '');
+$telefono  = trim($in['telefono'] ?? '');
+$clave     = (string)($in['contrasena'] ?? '');
 
-if (!$nombre || !$correo || !$contrasena) {
-  http_response_code(400);
-  echo json_encode(["success"=>false,"message"=>"nombre, correo y contraseña son obligatorios"]);
-  exit;
+if ($nombre==='' || $correo==='' || $telefono==='' || $clave==='') {
+  http_response_code(422); echo json_encode(["success"=>false,"msg"=>"Todos los campos son obligatorios"]); exit;
+}
+if (!preg_match('/^[^@]+@[^@]+\.[^@]+$/', $correo)) {
+  http_response_code(422); echo json_encode(["success"=>false,"msg"=>"Correo inválido"]); exit;
+}
+if (!preg_match('/^3\d{9}$/', $telefono)) {
+  http_response_code(422); echo json_encode(["success"=>false,"msg"=>"Teléfono inválido (Colombia)"]); exit;
 }
 
-if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) {
-  http_response_code(400);
-  echo json_encode(["success"=>false,"message"=>"Correo inválido"]);
-  exit;
-}
-
-$hash = password_hash($contrasena, PASSWORD_BCRYPT);
-$rol  = 'adoptante'; 
 try {
-  $stmt = $conn->prepare(
-    "INSERT INTO usuarios (nombre, correo, contrasena, telefono, rol) 
-     VALUES (?,?,?,?,?)"
-  );
-  $stmt->bind_param("sssss", $nombre, $correo, $hash, $telefono, $rol);
+  $hash = password_hash($clave, PASSWORD_BCRYPT, ['cost' => 12]);
+  $stmt = $conn->prepare("INSERT INTO usuarios (nombre, correo, contrasena, telefono, rol) VALUES (?,?,?,?, 'adoptante')");
+  $stmt->bind_param("ssss", $nombre, $correo, $hash, $telefono);
   $stmt->execute();
-  $id = $stmt->insert_id;
-  $stmt->close();
-
-  http_response_code(201);
-  echo json_encode([
-    "success"=>true,
-    "message"=>"Registro exitoso",
-    "user"=>[
-      "id"=>$id,
-      "nombre"=>$nombre,
-      "correo"=>$correo,
-      "telefono"=>$telefono,
-      "rol"=>$rol
-    ]
-  ]);
+  echo json_encode(["success"=>true, "id_usuario"=>$conn->insert_id]);
 } catch (mysqli_sql_exception $e) {
-  if ($e->getCode() === 1062) { // correo duplicado
-    http_response_code(409);
-    echo json_encode(["success"=>false,"message"=>"El correo ya está registrado"]);
+  if ($e->getCode() == 1062) {
+    http_response_code(409); echo json_encode(["success"=>false,"msg"=>"Correo ya registrado"]);
   } else {
-    http_response_code(500);
-    echo json_encode(["success"=>false,"message"=>"Error de servidor"]);
+    http_response_code(500); echo json_encode(["success"=>false,"msg"=>"Error: ".$e->getMessage()]);
   }
 }
-$conn->close();

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../Servicios/api_servicios.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -10,297 +11,351 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _name = TextEditingController();
-  final _email = TextEditingController();
-  final _phone = TextEditingController();
-  final _pass = TextEditingController();
+  final _nombreCtrl = TextEditingController();
+  final _correoCtrl = TextEditingController();
+  final _telCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
 
-  bool _loading = false;
+  bool _isLoading = false;
   bool _obscure = true;
 
   @override
   void dispose() {
-    _name.dispose();
-    _email.dispose();
-    _phone.dispose();
-    _pass.dispose();
+    _nombreCtrl.dispose();
+    _correoCtrl.dispose();
+    _telCtrl.dispose();
+    _passCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _doRegister() async {
+  String? _validarCelCo(String? v) {
+    final s = v?.trim() ?? '';
+    if (s.isEmpty) return 'Ingresa tu número de celular';
+    final reg = RegExp(r'^3\d{9}$'); // 10 dígitos, inicia en 3 (Colombia)
+    if (!reg.hasMatch(s)) return 'Celular inválido (ej: 3145910357)';
+    return null;
+  }
+
+  Future<void> _registrar() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
+    setState(() => _isLoading = true);
+
     try {
-      final res = await ApiService.register(
-        nombre: _name.text.trim(),
-        correo: _email.text.trim(),
-        contrasena: _pass.text,
-        telefono: _phone.text.trim(),
+      final resp = await ApiService.registro(
+        _nombreCtrl.text.trim(),
+        _correoCtrl.text.trim(),
+        _telCtrl.text.trim(),
+        _passCtrl.text,
       );
+
+      final ok = resp['success'] == true;
+      final msg =
+          (resp['msg'] ?? (ok ? '¡Registro exitoso!' : 'No se pudo registrar'))
+              .toString();
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(res['message'] ?? 'Registro exitoso'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      Navigator.pop(context); // volver al login
+
+      if (ok) {
+        // Volver a login mostrando banner de éxito
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/login',
+          (_) => false,
+          arguments: {'flash': '¡Cuenta creada con éxito! Inicia sesión.'},
+        );
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.red,
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Fallo de red: $e')));
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
-      body: Stack(
+      backgroundColor: cs.surface,
+      body: Column(
         children: [
-          const _PawHeader(
-            height: 260,
-            title: '¡Únete a la manada!',
-            subtitle: 'Crea tu cuenta y comienza a adoptar',
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 200, 24, 24),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: const [
-                            Icon(Icons.badge_outlined),
-                            SizedBox(width: 8),
-                            Text(
-                              'Registro Adoptante',
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
+          // Contenido desplazable y centrado
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                        maxWidth: 480,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Header degradado (no se superpone nada)
+                          Container(
+                            height: 140,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [cs.primary, cs.secondaryContainer],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: const BorderRadius.only(
+                                bottomLeft: Radius.circular(28),
+                                bottomRight: Radius.circular(28),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _name,
-                          textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(
-                            labelText: 'Nombre completo',
-                            prefixIcon: Icon(Icons.person_outline),
-                          ),
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Ingresa tu nombre'
-                              : null,
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _email,
-                          keyboardType: TextInputType.emailAddress,
-                          textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(
-                            labelText: 'Correo electrónico',
-                            prefixIcon: Icon(Icons.alternate_email),
-                          ),
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty)
-                              return 'Ingresa tu correo';
-                            if (!v.contains('@') || !v.contains('.'))
-                              return 'Correo inválido';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _phone,
-                          keyboardType: TextInputType.phone,
-                          textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(
-                            labelText: 'Teléfono',
-                            prefixIcon: Icon(Icons.phone_outlined),
-                          ),
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Ingresa tu teléfono'
-                              : null,
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _pass,
-                          obscureText: _obscure,
-                          decoration: InputDecoration(
-                            labelText: 'Contraseña',
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              onPressed: () =>
-                                  setState(() => _obscure = !_obscure),
-                              icon: Icon(
-                                _obscure
-                                    ? Icons.visibility
-                                    : Icons.visibility_off,
-                              ),
-                            ),
-                          ),
-                          validator: (v) => (v == null || v.length < 6)
-                              ? 'Mínimo 6 caracteres'
-                              : null,
-                        ),
-                        const SizedBox(height: 18),
-                        Row(
-                          children: const [
-                            Icon(Icons.info_outline, size: 18),
-                            SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                'Tu cuenta se crea como “adoptante”. '
-                                'Los administradores gestionan fundaciones y mascotas.',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _loading ? null : _doRegister,
-                            icon: _loading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
+                            child: SafeArea(
+                              bottom: false,
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    Icon(
+                                      Icons.pets,
+                                      color: Colors.white,
+                                      size: 26,
                                     ),
-                                  )
-                                : const Icon(Icons.check_circle_outline),
-                            label: const Text('Registrarme'),
+                                    SizedBox(width: 10),
+                                    Text(
+                                      'AdoptaAmigo',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 22,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextButton.icon(
-                          onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.login),
-                          label: const Text('¿Ya tienes cuenta? Inicia sesión'),
-                        ),
-                      ],
+
+                          const SizedBox(height: 18),
+
+                          // Card con formulario
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Card(
+                              elevation: 8,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  22,
+                                  16,
+                                  22,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Text(
+                                      'Crear cuenta',
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Form(
+                                      key: _formKey,
+                                      child: Column(
+                                        children: [
+                                          TextFormField(
+                                            controller: _nombreCtrl,
+                                            decoration: const InputDecoration(
+                                              labelText: 'Nombre',
+                                              prefixIcon: Icon(
+                                                Icons.person_outline,
+                                              ),
+                                            ),
+                                            validator: (v) =>
+                                                (v == null || v.trim().isEmpty)
+                                                ? 'Ingresa tu nombre'
+                                                : null,
+                                            textInputAction:
+                                                TextInputAction.next,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          TextFormField(
+                                            controller: _correoCtrl,
+                                            decoration: const InputDecoration(
+                                              labelText: 'Correo electrónico',
+                                              prefixIcon: Icon(
+                                                Icons.alternate_email,
+                                              ),
+                                            ),
+                                            keyboardType:
+                                                TextInputType.emailAddress,
+                                            validator: (v) {
+                                              final s = v?.trim() ?? '';
+                                              if (s.isEmpty) {
+                                                return 'Ingresa tu correo';
+                                              }
+                                              final ok = RegExp(
+                                                r'^[^@]+@[^@]+\.[^@]+$',
+                                              ).hasMatch(s);
+                                              return ok
+                                                  ? null
+                                                  : 'Correo inválido';
+                                            },
+                                            textInputAction:
+                                                TextInputAction.next,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          TextFormField(
+                                            controller: _telCtrl,
+                                            decoration: const InputDecoration(
+                                              labelText: 'Celular (Colombia)',
+                                              hintText: 'Ej: 3145910357',
+                                              prefixIcon: Icon(
+                                                Icons.phone_android,
+                                              ),
+                                              counterText: '',
+                                            ),
+                                            keyboardType: TextInputType.phone,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter
+                                                  .digitsOnly,
+                                              LengthLimitingTextInputFormatter(
+                                                10,
+                                              ),
+                                            ],
+                                            validator: _validarCelCo,
+                                            textInputAction:
+                                                TextInputAction.next,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          TextFormField(
+                                            controller: _passCtrl,
+                                            obscureText: _obscure,
+                                            decoration: InputDecoration(
+                                              labelText: 'Contraseña',
+                                              prefixIcon: const Icon(
+                                                Icons.lock_outline,
+                                              ),
+                                              suffixIcon: IconButton(
+                                                onPressed: () => setState(
+                                                  () => _obscure = !_obscure,
+                                                ),
+                                                icon: Icon(
+                                                  _obscure
+                                                      ? Icons.visibility
+                                                      : Icons.visibility_off,
+                                                ),
+                                              ),
+                                            ),
+                                            validator: (v) =>
+                                                (v == null || v.length < 6)
+                                                ? 'Mínimo 6 caracteres'
+                                                : null,
+                                            onFieldSubmitted: (_) =>
+                                                _registrar(),
+                                          ),
+                                          const SizedBox(height: 18),
+                                          SizedBox(
+                                            height: 46,
+                                            width: double.infinity,
+                                            child: FilledButton(
+                                              onPressed: _isLoading
+                                                  ? null
+                                                  : _registrar,
+                                              child: _isLoading
+                                                  ? const SizedBox(
+                                                      height: 22,
+                                                      width: 22,
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            color: Colors.white,
+                                                          ),
+                                                    )
+                                                  : const Text('Registrarme'),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 8),
+
+                          // Enlace a login
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Center(
+                              child: TextButton(
+                                onPressed: () => Navigator.of(
+                                  context,
+                                ).pushReplacementNamed('/login'),
+                                child: const Text(
+                                  '¿Ya tienes cuenta? Inicia sesión',
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 16),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
+
+          // Footer decorativo (fuera del scroll)
+          const _BottomDecor(),
         ],
       ),
     );
   }
 }
 
-// Reuso del header con huellitas
-class _PawHeader extends StatelessWidget {
-  const _PawHeader({
-    required this.height,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final double height;
-  final String title;
-  final String subtitle;
+class _BottomDecor extends StatelessWidget {
+  const _BottomDecor();
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: height,
-      width: double.infinity,
-      child: Stack(
-        children: [
-          Container(
-            height: height,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [cs.primaryContainer, cs.tertiary],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(32),
-                bottomRight: Radius.circular(32),
-              ),
-            ),
+    return Container(
+      height: 110,
+      margin: const EdgeInsets.only(top: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [cs.secondaryContainer.withOpacity(.35), cs.surface],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: Center(
+        child: Wrap(
+          spacing: 14,
+          children: List.generate(
+            8,
+            (i) =>
+                Icon(Icons.pets, size: 20, color: cs.primary.withOpacity(.25)),
           ),
-          Positioned(
-            top: 42,
-            right: 28,
-            child: Icon(
-              Icons.pets,
-              size: 64,
-              color: Colors.white.withOpacity(0.25),
-            ),
-          ),
-          Positioned(
-            top: 110,
-            left: 32,
-            child: Icon(
-              Icons.pets,
-              size: 40,
-              color: Colors.white.withOpacity(0.18),
-            ),
-          ),
-          Positioned(
-            top: 160,
-            right: 90,
-            child: Icon(
-              Icons.pets,
-              size: 28,
-              color: Colors.white.withOpacity(0.22),
-            ),
-          ),
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 60, 24, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.favorite, color: Colors.white),
-                      const SizedBox(width: 8),
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.95),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

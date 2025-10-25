@@ -1,73 +1,87 @@
 <?php
+require 'db_connection.php';
+header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
-header("Content-Type: application/json; charset=UTF-8");
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 
-$DEBUG = isset($_GET['debug']);
-if ($DEBUG) { $trace = []; $trace[] = "start"; }
-
-ini_set('display_errors', '0');
-ini_set('log_errors', '1');
-ini_set('error_log', __DIR__ . '/php_errors.log');
-
-require __DIR__ . '/db_connection.php';
-if ($DEBUG) { $trace[] = "db_ok"; }
-
-$raw = file_get_contents("php://input");
-if ($DEBUG) { $trace[] = "raw=" . ($raw === '' ? '(empty)' : $raw); }
-
-$data = json_decode($raw);
-if (!is_object($data)) {
-  http_response_code(400);
-  echo json_encode(["success"=>false,"message"=>"JSON inválido o vacío","raw"=>$raw, "debug"=>$DEBUG?$trace:null]);
+// Huella para comprobar que este archivo es el que atiende la petición
+if (isset($_GET['fp'])) {
+  echo json_encode(['file' => __FILE__, 'ts' => date('c')]);
   exit;
 }
 
-$correo     = $data->correo     ?? '';
-$contrasena = $data->contrasena ?? '';
-if (!$correo || !$contrasena) {
-  http_response_code(400);
-  echo json_encode(["success"=>false,"message"=>"correo y contraseña son obligatorios","debug"=>$DEBUG?$trace:null]);
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+  http_response_code(405);
+  echo json_encode(['success'=>false, 'msg'=>'Método no permitido (usa POST)']);
+  exit;
+}
+
+// Acepta JSON o form-data y normaliza nombres
+$raw = file_get_contents('php://input');
+$in  = json_decode($raw, true);
+if (!is_array($in) || empty($in)) { $in = $_POST; }
+$correo = trim((string)($in['correo'] ?? $in['email'] ?? ''));
+$clave  = (string)($in['contrasena'] ?? $in['password'] ?? $in['pass'] ?? '');
+
+if ($correo === '' || $clave === '') {
+  http_response_code(422);
+  echo json_encode(['success'=>false, 'msg'=>'Correo y contraseña son requeridos']);
   exit;
 }
 
 try {
-  if ($DEBUG) { $trace[] = "query_user"; }
-  $stmt = $conn->prepare("SELECT id_usuario, nombre, correo, contrasena, telefono, rol, id_fundacion
-                          FROM usuarios WHERE correo = ?");
+  $stmt = $conn->prepare("SELECT id_usuario, nombre, correo, contrasena, rol, telefono FROM usuarios WHERE correo=? LIMIT 1");
   $stmt->bind_param("s", $correo);
   $stmt->execute();
-  $res  = $stmt->get_result();
-  $user = $res->fetch_assoc();
-  $stmt->close();
-
-  if ($DEBUG) { $trace[] = "user_found=" . ($user ? 'yes' : 'no'); }
-
-  if (!$user || !password_verify($contrasena, $user['contrasena'])) {
-    http_response_code(401);
-    echo json_encode(["success"=>false,"message"=>"Credenciales inválidas","debug"=>$DEBUG?$trace:null]);
-    $conn->close(); exit;
+  $res = $stmt->get_result();
+  if (!$row = $res->fetch_assoc()) {
+    http_response_code(404);
+    echo json_encode(['success'=>false, 'msg'=>'Usuario no encontrado']);
+    exit;
   }
 
-  http_response_code(200);
-  echo json_encode([
-    "success"=>true,
-    "message"=>"Login exitoso",
-    "user"=>[
-      "id"           => (int)$user['id_usuario'],
-      "nombre"       => $user['nombre'],
-      "correo"       => $user['correo'],
-      "telefono"     => $user['telefono'],
-      "rol"          => $user['rol'],
-      "id_fundacion" => $user['id_fundacion'] ? (int)$user['id_fundacion'] : null
-    ],
-    "debug"=>$DEBUG?$trace:null
-  ]);
+  $stored = (string)($row['contrasena'] ?? '');
+  $ok = false;
+  $needsRehash = false;
+  $path = 'none';
+
+  // 1) Probar SIEMPRE como hash (bcrypt)
+  if ($stored !== '') {
+    $ok = @password_verify($clave, $stored);
+    if ($ok) {
+      $path = 'verify_hash';
+      if (password_get_info($stored)['algo'] !== 0 &&
+          password_needs_rehash($stored, PASSWORD_BCRYPT, ['cost'=>12])) {
+        $needsRehash = true;
+      }
+    }
+  }
+
+  // 2) Fallback: almacenado en texto plano (migrar)
+  if (!$ok && hash_equals($stored, $clave)) {
+    $ok = true;
+    $path = 'plaintext';
+    $needsRehash = true;
+  }
+
+  if (!$ok) {
+    http_response_code(401);
+    echo json_encode(['success'=>false, 'msg'=>'Credenciales inválidas', 'why'=>['path'=>$path]]);
+    exit;
+  }
+
+  if ($needsRehash) {
+    $nuevo = password_hash($clave, PASSWORD_BCRYPT, ['cost'=>12]);
+    $u = $conn->prepare("UPDATE usuarios SET contrasena=? WHERE id_usuario=?");
+    $u->bind_param("si", $nuevo, $row['id_usuario']);
+    $u->execute();
+  }
+
+  unset($row['contrasena']);
+  echo json_encode(['success'=>true, 'user'=>$row, 'why'=>['path'=>$path, 'rehash'=>$needsRehash]]);
 } catch (Throwable $e) {
-  error_log("login.php error: ".$e->getMessage());
   http_response_code(500);
-  echo json_encode(["success"=>false,"message"=>"Error de servidor", "debug"=>$DEBUG?$trace:null]);
+  echo json_encode(['success'=>false, 'msg'=>'Error de servidor: '.$e->getMessage()]);
 }
-$conn->close();

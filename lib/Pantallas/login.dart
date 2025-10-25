@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../Servicios/api_servicios.dart';
+import '../Servicios/session_manager.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -10,49 +11,117 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _email = TextEditingController();
-  final _pass = TextEditingController();
-  bool _loading = false;
+  final _correoCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  bool _isLoading = false;
   bool _obscure = true;
+
+  bool _flashShown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ScaffoldMessenger.of(context).clearMaterialBanners();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _maybeShowFlash();
+  }
+
+  void _maybeShowFlash() {
+    if (_flashShown) return;
+    final args = ModalRoute.of(context)?.settings.arguments;
+    String? msg;
+    if (args is Map && args['flash'] is String) msg = args['flash'] as String;
+
+    if (msg != null && msg!.isNotEmpty) {
+      _flashShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final cs = Theme.of(context).colorScheme;
+        ScaffoldMessenger.of(context).showMaterialBanner(
+          MaterialBanner(
+            elevation: 0,
+            backgroundColor: cs.primaryContainer,
+            leading: Icon(Icons.check_circle, color: cs.onPrimaryContainer),
+            content: Text(
+              msg!,
+              style: TextStyle(
+                color: cs.onPrimaryContainer,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () =>
+                    ScaffoldMessenger.of(context).hideCurrentMaterialBanner(),
+                child: Text(
+                  'Cerrar',
+                  style: TextStyle(color: cs.onPrimaryContainer),
+                ),
+              ),
+            ],
+          ),
+        );
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) {
+            ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+          }
+        });
+      });
+    }
+  }
 
   @override
   void dispose() {
-    _email.dispose();
-    _pass.dispose();
+    _correoCtrl.dispose();
+    _passCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _doLogin() async {
+  Future<void> _iniciarSesion() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
+    setState(() => _isLoading = true);
+
     try {
-      final res = await ApiService.login(
-        correo: _email.text.trim(),
-        contrasena: _pass.text,
+      final data = await ApiService.login(
+        correo: _correoCtrl.text.trim(),
+        contrasena: _passCtrl.text,
+        debug: true,
       );
+
+      final ok = data['success'] == true;
+      final msg =
+          (data['msg'] ?? (ok ? '¡Bienvenido!' : 'Credenciales inválidas'))
+              .toString();
 
       if (!mounted) return;
 
-      // Mensaje de éxito
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(res['message'] ?? 'Inicio de sesión correcto'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (ok) {
+        final user = (data['user'] as Map?)?.cast<String, dynamic>() ?? {};
+        await SessionManager.saveUser(user);
 
-      // 👉 Navegar a /home pasando el usuario
-      Navigator.pushReplacementNamed(context, '/home', arguments: res['user']);
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/home',
+          (_) => false,
+          arguments: {'user': user, 'flash': '¡Iniciaste sesión con éxito!'},
+        );
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.red,
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error de red: $e')));
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -61,220 +130,240 @@ class _LoginScreenState extends State<LoginScreen> {
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
+      backgroundColor: cs.surface,
       body: Column(
         children: [
-          const _PawHeader(
-            height: 170, // header más compacto
-            title: 'AdoptaAmigo',
-            subtitle: 'Encuentra a tu compañero perfecto',
-          ),
+          // Todo el contenido desplazable
           Expanded(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 420,
-                    minHeight: 400,
-                  ),
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(28),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.max,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.pets, color: cs.primary, size: 26),
-                                const SizedBox(width: 8),
-                                const Text(
-                                  'Iniciar Sesión',
-                                  style: TextStyle(
-                                    fontSize: 26,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 28),
-                            TextFormField(
-                              controller: _email,
-                              keyboardType: TextInputType.emailAddress,
-                              decoration: const InputDecoration(
-                                labelText: 'Correo electrónico',
-                                prefixIcon: Icon(Icons.alternate_email),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight:
+                            constraints.maxHeight, // para centrar vertical
+                        maxWidth: 480,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // HEADER
+                          Container(
+                            height: 140,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [cs.primary, cs.secondaryContainer],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
                               ),
-                              validator: (v) {
-                                if (v == null || v.trim().isEmpty) {
-                                  return 'Ingresa tu correo';
-                                }
-                                if (!v.contains('@') || !v.contains('.')) {
-                                  return 'Correo inválido';
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 20),
-                            TextFormField(
-                              controller: _pass,
-                              obscureText: _obscure,
-                              decoration: InputDecoration(
-                                labelText: 'Contraseña',
-                                prefixIcon: const Icon(Icons.lock_outline),
-                                suffixIcon: IconButton(
-                                  onPressed: () =>
-                                      setState(() => _obscure = !_obscure),
-                                  icon: Icon(
-                                    _obscure
-                                        ? Icons.visibility
-                                        : Icons.visibility_off,
-                                  ),
-                                ),
+                              borderRadius: const BorderRadius.only(
+                                bottomLeft: Radius.circular(28),
+                                bottomRight: Radius.circular(28),
                               ),
-                              validator: (v) => (v == null || v.length < 6)
-                                  ? 'Mínimo 6 caracteres'
-                                  : null,
                             ),
-                            const SizedBox(height: 28),
-                            SizedBox(
-                              height: 56,
-                              width: double.infinity,
-                              child: FilledButton.icon(
-                                onPressed: _loading ? null : _doLogin,
-                                icon: _loading
-                                    ? const SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.login),
-                                label: const Text(
-                                  'Entrar',
-                                  style: TextStyle(fontSize: 18),
+                            child: SafeArea(
+                              bottom: false,
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    Icon(
+                                      Icons.pets,
+                                      color: Colors.white,
+                                      size: 26,
+                                    ),
+                                    SizedBox(width: 10),
+                                    Text(
+                                      'AdoptaAmigo',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 22,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 16),
-                            Center(
-                              child: TextButton.icon(
-                                onPressed: () =>
-                                    Navigator.pushNamed(context, '/register'),
-                                icon: const Icon(Icons.person_add_alt_1),
-                                label: const Text(
+                          ),
+
+                          const SizedBox(height: 18),
+
+                          // CARD FORM
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Card(
+                              elevation: 8,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  22,
+                                  16,
+                                  22,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Text(
+                                      'Iniciar sesión',
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Form(
+                                      key: _formKey,
+                                      child: Column(
+                                        children: [
+                                          TextFormField(
+                                            controller: _correoCtrl,
+                                            keyboardType:
+                                                TextInputType.emailAddress,
+                                            decoration: const InputDecoration(
+                                              labelText: 'Correo electrónico',
+                                              prefixIcon: Icon(
+                                                Icons.alternate_email,
+                                              ),
+                                            ),
+                                            validator: (v) {
+                                              final s = v?.trim() ?? '';
+                                              if (s.isEmpty)
+                                                return 'Ingresa tu correo';
+                                              final ok = RegExp(
+                                                r'^[^@]+@[^@]+\.[^@]+$',
+                                              ).hasMatch(s);
+                                              return ok
+                                                  ? null
+                                                  : 'Correo inválido';
+                                            },
+                                            textInputAction:
+                                                TextInputAction.next,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          TextFormField(
+                                            controller: _passCtrl,
+                                            obscureText: _obscure,
+                                            decoration: InputDecoration(
+                                              labelText: 'Contraseña',
+                                              prefixIcon: const Icon(
+                                                Icons.lock_outline,
+                                              ),
+                                              suffixIcon: IconButton(
+                                                onPressed: () => setState(
+                                                  () => _obscure = !_obscure,
+                                                ),
+                                                icon: Icon(
+                                                  _obscure
+                                                      ? Icons.visibility
+                                                      : Icons.visibility_off,
+                                                ),
+                                              ),
+                                            ),
+                                            validator: (v) =>
+                                                (v == null || v.isEmpty)
+                                                ? 'Ingresa tu contraseña'
+                                                : null,
+                                            onFieldSubmitted: (_) =>
+                                                _iniciarSesion(),
+                                          ),
+                                          const SizedBox(height: 18),
+                                          SizedBox(
+                                            height: 46,
+                                            width: double.infinity,
+                                            child: FilledButton(
+                                              onPressed: _isLoading
+                                                  ? null
+                                                  : _iniciarSesion,
+                                              child: _isLoading
+                                                  ? const SizedBox(
+                                                      height: 22,
+                                                      width: 22,
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            color: Colors.white,
+                                                          ),
+                                                    )
+                                                  : const Text('Ingresar'),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 8),
+
+                          // ENLACE
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Center(
+                              child: TextButton(
+                                onPressed: () => Navigator.of(
+                                  context,
+                                ).pushReplacementNamed('/register'),
+                                child: const Text(
                                   '¿No tienes cuenta? Regístrate',
                                 ),
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+
+                          const SizedBox(height: 16), // pequeño respiro
+                        ],
                       ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
+
+          const _BottomDecor(),
         ],
       ),
     );
   }
 }
 
-class _PawHeader extends StatelessWidget {
-  const _PawHeader({
-    required this.height,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final double height;
-  final String title;
-  final String subtitle;
+class _BottomDecor extends StatelessWidget {
+  const _BottomDecor();
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Container(
-      height: height,
-      width: double.infinity,
+      height: 110,
+      margin: const EdgeInsets.only(top: 12),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [cs.primary, cs.secondaryContainer],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
+          colors: [cs.secondaryContainer.withOpacity(.35), cs.surface],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
         ),
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: 40,
-            right: 24,
-            child: Icon(
-              Icons.pets,
-              size: 64,
-              color: Colors.white.withOpacity(0.25),
-            ),
+      child: Center(
+        child: Wrap(
+          spacing: 14,
+          children: List.generate(
+            8,
+            (i) =>
+                Icon(Icons.pets, size: 20, color: cs.primary.withOpacity(.25)),
           ),
-          Positioned(
-            top: 100,
-            left: 24,
-            child: Icon(
-              Icons.pets,
-              size: 40,
-              color: Colors.white.withOpacity(0.18),
-            ),
-          ),
-          Positioned(
-            top: 130,
-            right: 80,
-            child: Icon(
-              Icons.pets,
-              size: 28,
-              color: Colors.white.withOpacity(0.22),
-            ),
-          ),
-          Positioned(
-            left: 24,
-            top: 40, // texto un poco más abajo
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.pets, color: Colors.white, size: 28),
-                    const SizedBox(width: 8),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.95),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
