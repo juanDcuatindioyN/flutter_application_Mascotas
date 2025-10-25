@@ -1,116 +1,311 @@
+// lib/Servicios/api_servicios.dart
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:http/http.dart' as http;
 
+/// Puedes sobreescribir desde línea de comando o .env:
+/// flutter run --dart-define=BASE_URL=http://192.168.1.50/mascotas_api
+const String _envBase = String.fromEnvironment('BASE_URL', defaultValue: '');
+
+/// Si usas dispositivo físico, pon aquí la IP de tu PC en la LAN:
+const String _lanBaseFallback =
+    'http://192.168.1.100/mascotas_api'; // <-- cámbiala si lo necesitas
+
+String get _autoBaseUrl {
+  if (_envBase.isNotEmpty) return _envBase;
+
+  if (kIsWeb) return 'http://localhost/mascotas_api';
+
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    // Android emulator (AVD) -> 10.0.2.2
+    // Genymotion -> 10.0.3.2 (descomenta si usas genymotion)
+    return 'http://10.0.2.2/mascotas_api';
+    // return 'http://10.0.3.2/mascotas_api';
+    // Si pruebas en DISPOSITIVO FÍSICO, usa tu IP LAN:
+    // return _lanBaseFallback;
+  }
+
+  // iOS simulador suele resolver localhost. Para iPhone real, usa tu IP LAN.
+  return 'http://localhost/mascotas_api';
+}
+
 class ApiService {
-  // ======= CONFIGURA AQUÍ TU BASE URL =======
-  // XAMPP (Apache en puerto 80):
-  static const String baseUrlWeb = 'http://localhost/mascotas_api';
-  // Android Emulator (accede al host con 10.0.2.2):
-  static const String baseUrlEmu = 'http://10.0.2.2/mascotas_api';
-  // Si pruebas en dispositivo físico, usa la IP de tu PC en la misma red:
-  // static const String baseUrlDevice = 'http://TU-IP-LAN/mascotas_api';
+  static String get baseUrl => _autoBaseUrl;
 
-  static String get _base {
-    // Para Web/Escritorio usa localhost; para Android Emulator usa 10.0.2.2
-    return kIsWeb ? baseUrlWeb : baseUrlEmu;
-  }
+  static const _headers = {'Content-Type': 'application/json; charset=UTF-8'};
 
-  static const Map<String, String> _headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  };
-
-  static const Duration _timeout = Duration(seconds: 15);
-
-  // ---------- Utils ----------
-  static Map<String, dynamic> _safeDecode(String src) {
-    try {
-      final decoded = json.decode(src);
-      return decoded is Map<String, dynamic>
-          ? decoded
-          : {'_nonmap': true, 'raw': src};
-    } catch (_) {
-      return {'_invalid_json': true, 'raw': src};
-    }
-  }
-
-  static Exception _buildException(
-    http.Response resp,
-    Map<String, dynamic> data,
-    String fallback,
-  ) {
-    // Si no vino JSON válido, muestra el body crudo para debug
-    if (data['_invalid_json'] == true || data['_nonmap'] == true) {
-      return Exception(
-        'HTTP ${resp.statusCode}. Respuesta no-JSON: ${resp.body}',
-      );
-    }
-    // Si vino JSON, intenta usar su mensaje
-    return Exception(data['message'] ?? '$fallback (HTTP ${resp.statusCode})');
-  }
-
-  // ---------- Endpoints ----------
-  /// Login con correo y contraseña.
+  // ------------------ Auth ------------------
   static Future<Map<String, dynamic>> login({
     required String correo,
     required String contrasena,
+    bool debug = true,
   }) async {
-    final uri = Uri.parse('$_base/login.php');
-    final resp = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({'correo': correo, 'contrasena': contrasena}),
-        )
-        .timeout(_timeout);
+    final url = debug ? '$baseUrl/login.php?debug=1' : '$baseUrl/login.php';
+    final payload = {'correo': correo.trim(), 'contrasena': contrasena};
+    try {
+      final r = await http
+          .post(Uri.parse(url), headers: _headers, body: jsonEncode(payload))
+          .timeout(const Duration(seconds: 12));
 
-    final data = _safeDecode(resp.body);
-
-    if (resp.statusCode == 200 && data['success'] == true) {
-      return data;
+      return _decode(r);
+    } catch (e) {
+      return {
+        'success': false,
+        'msg': 'Error de conexión: $e',
+        'http_status': 0,
+      };
     }
-    throw _buildException(resp, data, 'Error al iniciar sesión');
   }
 
-  /// Registro de usuario adoptante (rol forzado en backend).
-  static Future<Map<String, dynamic>> register({
+  static Future<Map<String, dynamic>> registro(
+    String nombre,
+    String correo,
+    String telefono,
+    String contrasena,
+  ) async {
+    try {
+      final r = await http.post(
+        Uri.parse('$baseUrl/register.php'),
+        headers: _headers,
+        body: jsonEncode({
+          'nombre': nombre,
+          'correo': correo,
+          'telefono': telefono,
+          'contrasena': contrasena,
+        }),
+      );
+      return _decode(r);
+    } catch (e) {
+      return {
+        'success': false,
+        'msg': 'Error de conexión: $e',
+        'http_status': 0,
+      };
+    }
+  }
+
+  // ------------------ Perfil ------------------
+  static Future<Map<String, dynamic>> getPerfil({
+    required int idUsuario,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/usuarios_get.php',
+      ).replace(queryParameters: {'id_usuario': '$idUsuario'});
+      final r = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 12));
+      return _decode(r);
+    } catch (e) {
+      return {'success': false, 'msg': 'Error de conexión', 'http_status': 0};
+    }
+  }
+
+  static Future<Map<String, dynamic>> actualizarPerfil({
+    required int idUsuario,
     required String nombre,
     required String correo,
-    required String contrasena,
     required String telefono,
   }) async {
-    final uri = Uri.parse('$_base/register.php');
-    final body = {
-      'nombre': nombre,
-      'correo': correo,
-      'contrasena': contrasena,
-      'telefono': telefono,
-    };
-
-    final resp = await http
-        .post(uri, headers: _headers, body: jsonEncode(body))
-        .timeout(_timeout);
-    final data = _safeDecode(resp.body);
-
-    // register.php debe responder 201 en éxito
-    if ((resp.statusCode == 201 || resp.statusCode == 200) &&
-        data['success'] == true) {
-      return data;
+    try {
+      final r = await http.post(
+        Uri.parse('$baseUrl/usuario.php'),
+        headers: _headers,
+        body: json.encode({
+          'id_usuario': idUsuario,
+          'nombre': nombre,
+          'correo': correo,
+          'telefono': telefono,
+        }),
+      );
+      return _decode(r);
+    } catch (e) {
+      return {'success': false, 'msg': 'Error de conexión', 'http_status': 0};
     }
-    throw _buildException(resp, data, 'Error al registrarse');
   }
 
-  /// Ping opcional para verificar que el backend responde.
-  static Future<bool> ping() async {
+  // ------------------ Password ------------------
+  static Future<Map<String, dynamic>> cambiarPassword({
+    required int idUsuario,
+    required String actual,
+    required String nueva,
+  }) async {
     try {
-      final resp = await http
-          .get(Uri.parse('$_base/ping.php'))
-          .timeout(_timeout);
-      final data = _safeDecode(resp.body);
-      return resp.statusCode == 200 && (data['ok'] == true);
-    } catch (_) {
-      return false;
+      final r = await http
+          .post(
+            Uri.parse(
+              '$baseUrl/password.php',
+            ), // <-- antes: usuarios_password.php
+            headers: _headers,
+            body: json.encode({
+              'id_usuario': idUsuario,
+              'actual': actual,
+              'nueva': nueva,
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+      return _decode(r);
+    } catch (e) {
+      return {'success': false, 'msg': 'Error de conexión', 'http_status': 0};
     }
+  }
+
+  // ------------------ Requisitos ------------------
+  static Future<Map<String, dynamic>> getRequisitos({
+    required int idUsuario,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/requisitos_get.php',
+      ).replace(queryParameters: {'id_usuario': '$idUsuario'});
+      final r = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 12));
+      return _decode(r);
+    } catch (e) {
+      return {'success': false, 'msg': 'Error de conexión', 'http_status': 0};
+    }
+  }
+
+  static Future<Map<String, dynamic>> saveRequisitos({
+    required int idUsuario,
+    required Map<String, dynamic> data,
+  }) async {
+    final uri = Uri.parse('$baseUrl/requisitos.php');
+    final bodyJson = json.encode({'id_usuario': idUsuario, ...data});
+
+    // ---- LOGS UTILES ----
+    // ignore: avoid_print
+    print('POST $uri');
+    // ignore: avoid_print
+    print('HEADERS=$_headers');
+    // ignore: avoid_print
+    print('BODY=$bodyJson');
+
+    try {
+      final r = await http
+          .post(uri, headers: _headers, body: bodyJson)
+          .timeout(const Duration(seconds: 12));
+
+      // ---- LOG DEL RAW POR SI EL SERVIDOR RESponde HTML ----
+      // ignore: avoid_print
+      print('RESP(${r.statusCode})=${r.body}');
+
+      return _decode(r);
+    } catch (e) {
+      return {
+        'success': false,
+        'msg': 'Error de conexión: $e',
+        'http_status': 0,
+      };
+    }
+  }
+
+  // ------------------ Solicitudes ------------------
+  static Future<Map<String, dynamic>> crearSolicitud({
+    required int idUsuario,
+    required int idMascota,
+  }) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('$baseUrl/solicitudes_create.php'),
+            headers: _headers,
+            body: jsonEncode({
+              'id_usuario': idUsuario,
+              'id_mascota': idMascota,
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+      return _decode(r);
+    } catch (e) {
+      return {'success': false, 'msg': 'Error de conexión', 'http_status': 0};
+    }
+  }
+
+  static Future<Map<String, dynamic>> solicitudesPorUsuario(
+    int idUsuario,
+  ) async {
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/solicitudes.php',
+      ).replace(queryParameters: {'id_usuario': '$idUsuario'});
+      final r = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 12));
+      return _decode(r);
+    } catch (e) {
+      return {'success': false, 'msg': 'Error de conexión', 'http_status': 0};
+    }
+  }
+
+  static Future<Map<String, dynamic>> cancelarSolicitud({
+    required int idSolicitud,
+    bool debug = true,
+  }) async {
+    final url = debug
+        ? '$baseUrl/solicitudes_cancel.php?debug=1'
+        : '$baseUrl/solicitudes_cancel.php';
+    try {
+      final r = await http
+          .post(
+            Uri.parse(url),
+            headers: _headers,
+            body: jsonEncode({'id_solicitud': idSolicitud}),
+          )
+          .timeout(const Duration(seconds: 12));
+      return _decode(r);
+    } catch (e) {
+      return {
+        'success': false,
+        'msg': 'Error de conexión: $e',
+        'http_status': 0,
+      };
+    }
+  }
+
+  // ------------------ Mascotas ------------------
+  static Future<Map<String, dynamic>> listarMascotas({
+    String estado = 'disponible',
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/mascotas_list.php',
+      ).replace(queryParameters: {'estado': estado});
+      final r = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      return _decode(r);
+    } catch (e) {
+      return {
+        'success': false,
+        'msg': 'Error de conexión: $e',
+        'items': const [],
+        'http_status': 0,
+      };
+    }
+  }
+
+  // ------------------ Helper ------------------
+  static Map<String, dynamic> _decode(http.Response r) {
+    Map<String, dynamic> out;
+    try {
+      out =
+          (r.body.isEmpty ? <String, dynamic>{} : json.decode(r.body))
+              as Map<String, dynamic>;
+    } catch (_) {
+      // Devolver raw para depurar si el servidor responde HTML/avisos
+      return {
+        'success': false,
+        'msg': 'Respuesta no válida del servidor',
+        'raw': r.body,
+        'http_status': r.statusCode,
+      };
+    }
+    out['http_status'] = r.statusCode;
+    out['success'] = out['success'] ?? out['ok'] ?? false;
+    out['msg'] = out['msg'] ?? out['message'] ?? '';
+    return out;
   }
 }
