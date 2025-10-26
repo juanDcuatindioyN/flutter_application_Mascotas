@@ -75,6 +75,50 @@ class _PaginaInicioState extends State<PaginaInicio> {
       }
       final idU = (user['id_usuario'] as num).toInt();
 
+      // Verificar si los requisitos están completos
+      final reqResp = await ApiService.getRequisitos(idUsuario: idU);
+      bool requisitosCompletos = false;
+      if (reqResp['success'] == true && reqResp['data'] is Map) {
+        final d = reqResp['data'] as Map<String, dynamic>;
+        final ciudad = d['ciudad']?.toString();
+        final direccion = d['direccion']?.toString();
+        final aceptoTerminos =
+            d['acepto_terminos'] == 1 || d['acepto_terminos'] == true;
+        requisitosCompletos =
+            (ciudad != null && ciudad.isNotEmpty) &&
+            (direccion != null && direccion.isNotEmpty) &&
+            aceptoTerminos;
+      }
+
+      if (!requisitosCompletos) {
+        // Mostrar diálogo para completar requisitos
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Requisitos incompletos'),
+            content: const Text(
+              'Para adoptar una mascota, debes completar tus requisitos de adoptante. '
+              'Ve a tu cuenta y llena la información necesaria.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx); // cerrar diálogo
+                  Navigator.pushNamed(context, '/account'); // ir a cuenta
+                },
+                child: const Text('Ir a mi cuenta'),
+              ),
+            ],
+          ),
+        );
+        setState(() => _sendingAdopt = false);
+        return;
+      }
+
       final resp = await ApiService.crearSolicitud(
         idUsuario: idU,
         idMascota: idMascota,

@@ -10,7 +10,7 @@ const String _envBase = String.fromEnvironment('BASE_URL', defaultValue: '');
 
 /// Si usas dispositivo físico, pon aquí la IP de tu PC en la LAN:
 const String _lanBaseFallback =
-    'http://192.168.1.100/mascotas_api'; // <-- cámbiala si lo necesitas
+    'http://192.168.1.7/mascotas_api'; // <-- actualizada con tu IP
 
 String get _autoBaseUrl {
   if (_envBase.isNotEmpty) return _envBase;
@@ -20,10 +20,10 @@ String get _autoBaseUrl {
   if (defaultTargetPlatform == TargetPlatform.android) {
     // Android emulator (AVD) -> 10.0.2.2
     // Genymotion -> 10.0.3.2 (descomenta si usas genymotion)
-    return 'http://10.0.2.2/mascotas_api';
+    // return 'http://10.0.2.2/mascotas_api';
     // return 'http://10.0.3.2/mascotas_api';
     // Si pruebas en DISPOSITIVO FÍSICO, usa tu IP LAN:
-    // return _lanBaseFallback;
+    return _lanBaseFallback;
   }
 
   // iOS simulador suele resolver localhost. Para iPhone real, usa tu IP LAN.
@@ -91,7 +91,7 @@ class ApiService {
   }) async {
     try {
       final uri = Uri.parse(
-        '$baseUrl/usuarios_get.php',
+        '$baseUrl/usuario.php',
       ).replace(queryParameters: {'id_usuario': '$idUsuario'});
       final r = await http
           .get(uri, headers: _headers)
@@ -157,7 +157,7 @@ class ApiService {
   }) async {
     try {
       final uri = Uri.parse(
-        '$baseUrl/requisitos_get.php',
+        '$baseUrl/requisitos.php',
       ).replace(queryParameters: {'id_usuario': '$idUsuario'});
       final r = await http
           .get(uri, headers: _headers)

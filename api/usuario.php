@@ -19,8 +19,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         exit;
     }
 
-    $sql = "SELECT id_usuario, nombre, correo, telefono 
-            FROM usuarios 
+    $sql = "SELECT id_usuario, nombre, correo, telefono, calificacion
+            FROM usuarios
             WHERE id_usuario = ?";
     $st = $conn->prepare($sql);
     $st->bind_param('i', $id);

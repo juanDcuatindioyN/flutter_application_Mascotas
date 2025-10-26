@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // <- para inputFormatters
 import '../Servicios/api_servicios.dart';
 import '../Servicios/session_manager.dart';
 import '../Servicios/ui_helpers.dart';
@@ -16,7 +15,6 @@ class _CuentaScreenState extends State<CuentaScreen> {
   Map<String, dynamic>? _user;
   bool _loadingPerfil = true;
   bool _savingPerfil = false;
-  bool _loadingReq = true;
   bool _savingReq = false;
   bool _savingPass = false;
 
@@ -133,11 +131,21 @@ class _CuentaScreenState extends State<CuentaScreen> {
       final resp = await ApiService.getPerfil(idUsuario: idU);
       if (resp['success'] == true && resp['data'] is Map) {
         final d = resp['data'] as Map<String, dynamic>;
+        print('DEBUG: _cargarPerfil - d: $d');
+        print('DEBUG: _cargarPerfil - _user before: $_user');
+        final newUser = Map<String, dynamic>.from(_user!);
+        newUser['calificacion'] = d['calificacion'] ?? 0.0;
         setState(() {
+          _user = newUser;
           _nombreCtrl.text = (d['nombre'] ?? '').toString();
           _correoCtrl.text = (d['correo'] ?? '').toString();
           _telCtrl.text = (d['telefono'] ?? '').toString();
         });
+        print('DEBUG: _cargarPerfil - _user after: $_user');
+        // Actualizar la sesión con los datos frescos
+        if (_user != null) {
+          await SessionManager.saveUser(_user!);
+        }
       }
     } catch (_) {
       /* noop */
@@ -181,7 +189,6 @@ class _CuentaScreenState extends State<CuentaScreen> {
 
   // ============= REQUISITOS =============
   Future<void> _cargarRequisitos() async {
-    setState(() => _loadingReq = true);
     try {
       if (_user == null) return;
       final idU = (_user!['id_usuario'] as num).toInt();
@@ -190,11 +197,20 @@ class _CuentaScreenState extends State<CuentaScreen> {
       if (resp['success'] == true && resp['data'] is Map) {
         final d = Map<String, dynamic>.from(resp['data'] as Map);
         setState(() {
-          _ciudad = (d['ciudad'] ?? '') as String?;
+          _ciudad = d['ciudad'] as String?;
+          if (_ciudad != null && _ciudad!.isEmpty) _ciudad = null;
           _direccionCtrl.text = (d['direccion'] ?? '').toString();
           _ocupacionCtrl.text = (d['ocupacion'] ?? '').toString();
-          _viviendaPropiedad = (d['vivienda_propiedad'] ?? '') as String?;
-          _tipoVivienda = (d['tipo_vivienda'] ?? '') as String?;
+          _viviendaPropiedad = d['vivienda_propiedad'] as String?;
+          if (_viviendaPropiedad != null && _viviendaPropiedad!.isEmpty)
+            _viviendaPropiedad = null;
+          final tipo = d['tipo_vivienda'] as String?;
+          _tipoVivienda =
+              (tipo != null &&
+                  tipo.isNotEmpty &&
+                  ['casa', 'apartamento', 'finca', 'otro'].contains(tipo))
+              ? tipo
+              : null;
           _tieneNinos = (d['tiene_ninos'] == 1 || d['tiene_ninos'] == true);
           _tieneMascotas =
               (d['tiene_mascotas'] == 1 || d['tiene_mascotas'] == true);
@@ -208,8 +224,6 @@ class _CuentaScreenState extends State<CuentaScreen> {
       }
     } catch (_) {
       /* noop */
-    } finally {
-      if (mounted) setState(() => _loadingReq = false);
     }
   }
 
@@ -277,6 +291,23 @@ class _CuentaScreenState extends State<CuentaScreen> {
               .toString();
 
       _toastTop(msg, ok: ok);
+
+      if (ok) {
+        // Actualizar el estado local con los datos guardados para reflejar en la UI inmediatamente
+        setState(() {
+          _ciudad = payload['ciudad'] as String?;
+          _direccionCtrl.text = payload['direccion'] as String;
+          _ocupacionCtrl.text = payload['ocupacion'] as String;
+          _viviendaPropiedad = payload['vivienda_propiedad'] as String?;
+          _tipoVivienda = payload['tipo_vivienda'] as String?;
+          _tieneNinos = (payload['tiene_ninos'] as int) == 1;
+          _tieneMascotas = (payload['tiene_mascotas'] as int) == 1;
+          _espacioExterior = (payload['espacio_exterior'] as int) == 1;
+          _tiempoLibreCtrl.text = payload['tiempo_libre'] as String;
+          _referenciasCtrl.text = payload['referencias'] as String;
+          _aceptoTerminos = (payload['acepto_terminos'] as int) == 1;
+        });
+      }
 
       // Si usas modal para editar requisitos, ciérralo aquí:
       // if (ok) Navigator.of(context).pop();
@@ -423,6 +454,46 @@ class _CuentaScreenState extends State<CuentaScreen> {
     );
   }
 
+  Widget _actionCard({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required VoidCallback? onTap,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 1.5,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: cs.secondaryContainer,
+              foregroundColor: cs.onSecondaryContainer,
+              child: Icon(icon),
+            ),
+            title: Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            subtitle: (subtitle == null || subtitle.isEmpty)
+                ? null
+                : Text(subtitle),
+            trailing: const Icon(Icons.chevron_right),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 2,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openRequisitos() async {
     if (_reqSheetAbierto) return;
     _reqSheetAbierto = true;
@@ -458,7 +529,9 @@ class _CuentaScreenState extends State<CuentaScreen> {
                               Icon(Icons.fact_check, color: cs.primary),
                               const SizedBox(width: 8),
                               Text(
-                                'Requisitos del adoptante',
+                                _requisitosCompletos
+                                    ? 'Requisitos completados'
+                                    : 'Requisitos del adoptante',
                                 style: Theme.of(ctx).textTheme.titleMedium
                                     ?.copyWith(fontWeight: FontWeight.w800),
                               ),
@@ -550,32 +623,48 @@ class _CuentaScreenState extends State<CuentaScreen> {
                                 const SizedBox(height: 12),
 
                                 // Tipo de vivienda
-                                DropdownButtonFormField<String>(
-                                  value: _tipoVivienda,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Tipo de vivienda',
-                                    prefixIcon: Icon(Icons.house_outlined),
-                                  ),
-                                  items: const [
-                                    DropdownMenuItem(
-                                      value: 'casa',
-                                      child: Text('Casa'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'apartamento',
-                                      child: Text('Apartamento'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'finca',
-                                      child: Text('Finca'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'otro',
-                                      child: Text('Otro'),
-                                    ),
-                                  ],
-                                  onChanged: (v) =>
-                                      setModalState(() => _tipoVivienda = v),
+                                Builder(
+                                  builder: (context) {
+                                    // Ensure _tipoVivienda is valid or null
+                                    String? tipoViviendaValue = _tipoVivienda;
+                                    if (tipoViviendaValue != null &&
+                                        ![
+                                          'casa',
+                                          'apartamento',
+                                          'finca',
+                                          'otro',
+                                        ].contains(tipoViviendaValue)) {
+                                      tipoViviendaValue = null;
+                                    }
+                                    return DropdownButtonFormField<String>(
+                                      value: tipoViviendaValue,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Tipo de vivienda',
+                                        prefixIcon: Icon(Icons.house_outlined),
+                                      ),
+                                      items: const [
+                                        DropdownMenuItem(
+                                          value: 'casa',
+                                          child: Text('Casa'),
+                                        ),
+                                        DropdownMenuItem(
+                                          value: 'apartamento',
+                                          child: Text('Apartamento'),
+                                        ),
+                                        DropdownMenuItem(
+                                          value: 'finca',
+                                          child: Text('Finca'),
+                                        ),
+                                        DropdownMenuItem(
+                                          value: 'otro',
+                                          child: Text('Otro'),
+                                        ),
+                                      ],
+                                      onChanged: (v) => setModalState(
+                                        () => _tipoVivienda = v,
+                                      ),
+                                    );
+                                  },
                                 ),
                                 const SizedBox(height: 12),
 
@@ -824,89 +913,67 @@ class _CuentaScreenState extends State<CuentaScreen> {
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mi cuenta'),
-        actions: [
-          IconButton(
-            tooltip: 'Cerrar sesión',
-            onPressed: () async {
-              await SessionManager.clear();
-              if (!mounted) return;
-              Navigator.of(
-                context,
-              ).pushNamedAndRemoveUntil('/login', (_) => false);
-            },
-            icon: const Icon(Icons.logout),
-          ),
-        ],
-      ),
       body: RefreshIndicator(
         onRefresh: _cargarTodo,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          padding: EdgeInsets.zero,
           children: [
-            _HeaderUser(user: _user),
-            const SizedBox(height: 16),
+            _HeaderCuenta(
+              title: 'Mi cuenta',
+              subtitle: 'Gestiona tu perfil y requisitos',
+              greeting: _user?['nombre'] == null
+                  ? null
+                  : 'Hola, ${_user!['nombre']}',
+              onLogout: () async {
+                await SessionManager.clear();
+                if (!mounted) return;
+                Navigator.of(
+                  context,
+                ).pushNamedAndRemoveUntil('/login', (_) => false);
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              child: Column(
+                children: [
+                  _HeaderUser(user: _user),
+                  const SizedBox(height: 16),
 
-            // --- acceso a Editar perfil ---
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: ListTile(
-                leading: const Icon(Icons.person),
-                title: const Text('Editar perfil'),
-                subtitle: Text(
-                  _user?['nombre']?.toString().isNotEmpty == true
-                      ? _user!['nombre'].toString()
-                      : 'Actualiza tu nombre y celular',
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: _openEditarPerfil,
+                  // Editar perfil
+                  _actionCard(
+                    context: context,
+                    icon: Icons.person,
+                    title: 'Editar perfil',
+                    subtitle: _user?['nombre']?.toString() ?? '',
+                    onTap: _loadingPerfil ? null : _openEditarPerfil,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Cambiar contraseña
+                  _actionCard(
+                    context: context,
+                    icon: Icons.lock_reset,
+                    title: 'Cambiar contraseña',
+                    subtitle: 'Actualiza tu contraseña de acceso',
+                    onTap: _openCambiarPassword,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Requisitos
+                  _actionCard(
+                    context: context,
+                    icon: Icons.fact_check,
+                    title: 'Requisitos del adoptante',
+                    subtitle: _requisitosCompletos
+                        ? 'Completo ✓'
+                        : _requisitosEstadoTexto(),
+                    onTap: _openRequisitos,
+                  ),
+                ],
               ),
             ),
-
-            const SizedBox(height: 16),
-
-            // --- acceso a Cambiar contraseña ---
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: ListTile(
-                leading: const Icon(Icons.lock_reset),
-                title: const Text('Cambiar contraseña'),
-                subtitle: const Text('Actualiza tu contraseña de acceso'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: _openCambiarPassword,
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // --- acceso a Requisitos del adoptante ---
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: ListTile(
-                leading: const Icon(Icons.fact_check),
-                title: const Text('Requisitos del adoptante'),
-                subtitle: Text(_requisitosEstadoTexto()),
-                trailing: Icon(
-                  _requisitosCompletos
-                      ? Icons.check_circle
-                      : Icons.error_outline,
-                  color: _requisitosCompletos ? cs.primary : cs.error,
-                ),
-                onTap: _openRequisitos,
-              ),
-            ),
-
-            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -946,37 +1013,194 @@ class _CuentaScreenState extends State<CuentaScreen> {
 }
 
 // ===== widgets pequeños =====
+class _HeaderCuenta extends StatelessWidget {
+  const _HeaderCuenta({
+    required this.title,
+    required this.subtitle,
+    required this.greeting,
+    required this.onLogout,
+  });
+
+  final String title;
+  final String subtitle;
+  final String? greeting;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [cs.primary, cs.primary.withOpacity(0.8)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(24),
+          bottomRight: Radius.circular(24),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 64, 16, 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: cs.onPrimary,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: cs.onPrimary.withOpacity(0.9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Cerrar sesión',
+                onPressed: onLogout,
+                icon: Icon(Icons.logout, color: cs.onPrimary),
+              ),
+            ],
+          ),
+          if (greeting != null) ...[
+            const SizedBox(height: 16),
+            Text(
+              greeting!,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: cs.onPrimary,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _HeaderUser extends StatelessWidget {
   const _HeaderUser({required this.user});
   final Map<String, dynamic>? user;
 
+  double _parseRating(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v.toDouble();
+    final s = v.toString();
+    return double.tryParse(s) ?? 0;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final name = user?['nombre']?.toString() ?? 'Usuario';
-    final email = user?['correo']?.toString() ?? '';
-    return Row(
-      children: [
-        CircleAvatar(
-          radius: 28,
-          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-          child: const Icon(Icons.person, size: 30),
+    final cs = Theme.of(context).colorScheme;
+    final name = (user?['nombre'] ?? 'Usuario').toString();
+    final email = (user?['correo'] ?? '').toString();
+    final rating = _parseRating(
+      user?['calificacion'],
+    ); // ← viene de BD (puede ser null)
+    print('DEBUG: _HeaderUser - user: $user');
+    print('DEBUG: _HeaderUser - rating: $rating');
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [cs.primaryContainer, cs.primaryContainer.withOpacity(0.75)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                name,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              Text(email, style: Theme.of(context).textTheme.bodySmall),
-            ],
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 28,
+            backgroundColor: cs.onPrimaryContainer.withOpacity(0.1),
+            child: Icon(Icons.person, size: 30, color: cs.onPrimaryContainer),
           ),
-        ),
-      ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Nombre
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: cs.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: cs.onPrimaryContainer.withOpacity(0.85),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _StarRow(rating: rating, color: cs.onPrimaryContainer),
+                    const SizedBox(width: 8),
+                    Text(
+                      rating > 0 ? rating.toStringAsFixed(1) : '—',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onPrimaryContainer.withOpacity(0.85),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StarRow extends StatelessWidget {
+  const _StarRow({required this.rating, required this.color});
+  final double rating;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final full = rating.floor();
+    final hasHalf = (rating - full) >= 0.5;
+    return Row(
+      children: List.generate(5, (i) {
+        if (i < full) {
+          return Icon(Icons.star, size: 18, color: Colors.amber);
+        } else if (i == full && hasHalf) {
+          return Icon(Icons.star_half, size: 18, color: Colors.amber);
+        } else {
+          return Icon(
+            Icons.star_border,
+            size: 18,
+            color: color.withOpacity(0.5),
+          );
+        }
+      }),
     );
   }
 }
