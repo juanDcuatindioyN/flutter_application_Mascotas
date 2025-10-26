@@ -11,3 +11,4 @@ restartPolicyMaxRetries = 10
 
 [build.env]
 FLUTTER_ROOT = "/opt/flutter"
+FLUTTER_VERSION = "3.19.6"
