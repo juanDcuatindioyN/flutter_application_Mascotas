@@ -1,0 +1,34 @@
+# -------- Stage único: PHP 8.2 + Apache
+FROM php:8.2-apache
+
+# Instalar extensiones comunes si las necesitas (mysqli, pdo_mysql)
+RUN docker-php-ext-install mysqli pdo pdo_mysql
+
+# Habilitar mod_rewrite
+RUN a2enmod rewrite headers
+
+# Configurar Apache: DocumentRoot /var/www/html
+# Copiamos solo la carpeta api/ a /var/www/html
+WORKDIR /var/www/html
+COPY api/ /var/www/html/
+
+# CORS básico (opcional, si tu API será consumida por dominio web separado)
+# Puedes ajustar los orígenes permitidos luego
+RUN printf "<Directory /var/www/html>\n\
+    AllowOverride All\n\
+    Require all granted\n\
+</Directory>\n" > /etc/apache2/conf-available/allowoverride.conf \
+ && a2enconf allowoverride
+
+# .htaccess para CORS y JSON por defecto
+RUN printf "Header set Access-Control-Allow-Origin \"*\"\n\
+Header set Access-Control-Allow-Methods \"GET, POST, OPTIONS\"\n\
+Header set Access-Control-Allow-Headers \"Content-Type, Authorization\"\n\
+\n\
+RewriteEngine On\n\
+# Sirve .php normalmente\n\
+RewriteCond %{REQUEST_FILENAME} !-f\n\
+RewriteRule ^ - [L]\n" > /var/www/html/.htaccess
+
+EXPOSE 80
+CMD ["apache2-foreground"]
