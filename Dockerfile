@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Flutter
-RUN git clone https://github.com/flutter/flutter.git -b 3.19.6 --depth 1 /flutter
+RUN git clone https://github.com/flutter/flutter.git -b stable --depth 1 /flutter
 ENV PATH="$PATH:/flutter/bin"
 
 # Enable Flutter web
