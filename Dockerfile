@@ -1,7 +1,7 @@
 # Multi-stage build for Flutter web app
 
 # Stage 1: Build the Flutter app
-FROM cirrusci/flutter:3.19.6 AS build
+FROM flutter/flutter:3.19.6 AS build
 
 WORKDIR /app
 
