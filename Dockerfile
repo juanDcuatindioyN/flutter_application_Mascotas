@@ -1,7 +1,24 @@
 # Multi-stage build for Flutter web app
 
 # Stage 1: Build the Flutter app
-FROM flutter/flutter:3.19.6 AS build
+FROM ubuntu:20.04 AS build
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    unzip \
+    xz-utils \
+    zip \
+    libglu1-mesa \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Flutter
+RUN git clone https://github.com/flutter/flutter.git -b 3.19.6 --depth 1 /flutter
+ENV PATH="$PATH:/flutter/bin"
+
+# Enable Flutter web
+RUN flutter config --enable-web
 
 WORKDIR /app
 
