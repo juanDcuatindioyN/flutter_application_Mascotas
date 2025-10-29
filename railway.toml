@@ -1,14 +1,10 @@
 [build]
-builder = "nixpacks"
-buildCommand = "flutter build web --release"
+builder = "dockerfile"
+dockerfilePath = "./Dockerfile"
 
 [deploy]
-startCommand = "cd build/web && python3 -m http.server 8080"
+startCommand = "nginx -g 'daemon off;'"
 healthcheckPath = "/"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
-
-[build.env]
-FLUTTER_ROOT = "/opt/flutter"
-FLUTTER_VERSION = "3.19.6"
