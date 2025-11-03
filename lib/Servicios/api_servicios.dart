@@ -35,14 +35,20 @@ class ApiService {
 
   static const _headers = {'Content-Type': 'application/json; charset=UTF-8'};
 
-  // ------------------ Auth ------------------
+  // ------------------ Autenticación ------------------
   static Future<Map<String, dynamic>> login({
     required String correo,
     required String contrasena,
     bool debug = true,
   }) async {
-    final url = debug ? '$baseUrl/login.php?debug=1' : '$baseUrl/login.php';
-    final payload = {'correo': correo.trim(), 'contrasena': contrasena};
+    final url = debug
+        ? '$baseUrl/autenticacion.php?debug=1'
+        : '$baseUrl/autenticacion.php';
+    final payload = {
+      'action': 'login',
+      'correo': correo.trim(),
+      'contrasena': contrasena,
+    };
     try {
       final r = await http
           .post(Uri.parse(url), headers: _headers, body: jsonEncode(payload))
@@ -66,9 +72,10 @@ class ApiService {
   ) async {
     try {
       final r = await http.post(
-        Uri.parse('$baseUrl/register.php'),
+        Uri.parse('$baseUrl/autenticacion.php'),
         headers: _headers,
         body: jsonEncode({
+          'action': 'register',
           'nombre': nombre,
           'correo': correo,
           'telefono': telefono,
@@ -85,14 +92,14 @@ class ApiService {
     }
   }
 
-  // ------------------ Perfil ------------------
+  // ------------------ Usuario ------------------
   static Future<Map<String, dynamic>> getPerfil({
     required int idUsuario,
   }) async {
     try {
-      final uri = Uri.parse(
-        '$baseUrl/usuario.php',
-      ).replace(queryParameters: {'id_usuario': '$idUsuario'});
+      final uri = Uri.parse('$baseUrl/usuario.php').replace(
+        queryParameters: {'action': 'profile', 'id_usuario': '$idUsuario'},
+      );
       final r = await http
           .get(uri, headers: _headers)
           .timeout(const Duration(seconds: 12));
@@ -113,6 +120,7 @@ class ApiService {
         Uri.parse('$baseUrl/usuario.php'),
         headers: _headers,
         body: json.encode({
+          'action': 'update_profile',
           'id_usuario': idUsuario,
           'nombre': nombre,
           'correo': correo,
@@ -125,7 +133,6 @@ class ApiService {
     }
   }
 
-  // ------------------ Password ------------------
   static Future<Map<String, dynamic>> cambiarPassword({
     required int idUsuario,
     required String actual,
@@ -134,11 +141,10 @@ class ApiService {
     try {
       final r = await http
           .post(
-            Uri.parse(
-              '$baseUrl/password.php',
-            ), // <-- antes: usuarios_password.php
+            Uri.parse('$baseUrl/usuario.php'),
             headers: _headers,
             body: json.encode({
+              'action': 'change_password',
               'id_usuario': idUsuario,
               'actual': actual,
               'nueva': nueva,
@@ -151,14 +157,13 @@ class ApiService {
     }
   }
 
-  // ------------------ Requisitos ------------------
   static Future<Map<String, dynamic>> getRequisitos({
     required int idUsuario,
   }) async {
     try {
-      final uri = Uri.parse(
-        '$baseUrl/requisitos.php',
-      ).replace(queryParameters: {'id_usuario': '$idUsuario'});
+      final uri = Uri.parse('$baseUrl/usuario.php').replace(
+        queryParameters: {'action': 'requisitos', 'id_usuario': '$idUsuario'},
+      );
       final r = await http
           .get(uri, headers: _headers)
           .timeout(const Duration(seconds: 12));
@@ -172,8 +177,12 @@ class ApiService {
     required int idUsuario,
     required Map<String, dynamic> data,
   }) async {
-    final uri = Uri.parse('$baseUrl/requisitos.php');
-    final bodyJson = json.encode({'id_usuario': idUsuario, ...data});
+    final uri = Uri.parse('$baseUrl/usuario.php');
+    final bodyJson = json.encode({
+      'action': 'save_requisitos',
+      'id_usuario': idUsuario,
+      ...data,
+    });
 
     // ---- LOGS UTILES ----
     // ignore: avoid_print
@@ -210,9 +219,10 @@ class ApiService {
     try {
       final r = await http
           .post(
-            Uri.parse('$baseUrl/solicitudes_create.php'),
+            Uri.parse('$baseUrl/solicitudes.php'),
             headers: _headers,
             body: jsonEncode({
+              'action': 'create',
               'id_usuario': idUsuario,
               'id_mascota': idMascota,
             }),
@@ -245,14 +255,14 @@ class ApiService {
     bool debug = true,
   }) async {
     final url = debug
-        ? '$baseUrl/solicitudes_cancel.php?debug=1'
-        : '$baseUrl/solicitudes_cancel.php';
+        ? '$baseUrl/solicitudes.php?debug=1'
+        : '$baseUrl/solicitudes.php';
     try {
       final r = await http
           .post(
             Uri.parse(url),
             headers: _headers,
-            body: jsonEncode({'id_solicitud': idSolicitud}),
+            body: jsonEncode({'action': 'cancel', 'id_solicitud': idSolicitud}),
           )
           .timeout(const Duration(seconds: 12));
       return _decode(r);
@@ -271,7 +281,7 @@ class ApiService {
   }) async {
     try {
       final uri = Uri.parse(
-        '$baseUrl/mascotas_list.php',
+        '$baseUrl/mascotas.php',
       ).replace(queryParameters: {'estado': estado});
       final r = await http
           .get(uri, headers: _headers)
