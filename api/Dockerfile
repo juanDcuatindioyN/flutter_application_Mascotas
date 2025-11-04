@@ -18,4 +18,4 @@ EXPOSE 8080
 
 # Arranque del servidor embebido de PHP escuchando en 0.0.0.0:$PORT
 # -t /app usa la raíz como "document root" (porque tus endpoints están en /app/*.php)
-CMD [ "sh", "-c", "php -S 0.0.0.0:${PORT} -t /app" ]
+CMD ["sh", "-c", "php -S 0.0.0.0:${PORT} -t /app /app/router.php"]
