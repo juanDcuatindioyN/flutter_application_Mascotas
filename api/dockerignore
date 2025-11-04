@@ -1,0 +1,13 @@
+# .dockerignore
+.git
+.gitignore
+node_modules
+vendor
+**/__pycache__
+**/.DS_Store
+.env
+.env.*
+*.log
+tmp
+tests
+README.md
